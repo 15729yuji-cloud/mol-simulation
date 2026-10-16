@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>物質量 (mol) 総合計算シミュレータ</title>
+  <style>
+    body { font-family: sans-serif; background: #eef2f5; margin: 0; padding: 20px; color: #333; }
+    .card { background: #fff; padding: 24px; border-radius: 16px; max-width: 680px; margin: 0 auto; box-shadow: 0 8px 20px rgba(0,0,0,0.08); }
+    h2 { margin-top: 0; text-align: center; color: #1e293b; }
+    
+    /* 描画エリア (粒子＋風船) */
+    .vis-container { display: flex; gap: 10px; width: 100%; height: 180px; background: #0f172a; border-radius: 12px; margin-bottom: 20px; overflow: hidden; }
+    .vis-box { flex: 1; position: relative; }
+    canvas { width: 100%; height: 100%; display: block; }
+    .vis-label { position: absolute; top: 8px; left: 10px; color: #94a3b8; font-size: 12px; }
+
+    .group { margin-bottom: 16px; }
+    label { font-weight: bold; display: block; margin-bottom: 6px; color: #475569; }
+    select, input[type="range"], input[type="number"] { width: 100%; padding: 10px; border: 1px solid #cbd5e1; border-radius: 8px; box-sizing: border-box; font-size: 15px; }
+    
+    .range-flex { display: flex; align-items: center; gap: 12px; }
+
+    /* 計算式ガイドボックス */
+    .formula-card { background: #f0fdf4; border: 1px solid #bbf7d0; padding: 14px; border-radius: 10px; margin-bottom: 20px; }
+    .formula-title { font-weight: bold; color: #166534; font-size: 14px; margin-bottom: 6px; }
+    .formula-text { font-family: monospace; font-size: 14px; color: #15803d; line-height: 1.6; }
+
+    /* 結果グリッド */
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .res-box { background: #f8fafc; padding: 14px; border-radius: 10px; text-align: center; border: 1px solid #e2e8f0; }
+    .res-title { font-size: 12px; color: #64748b; font-weight: bold; }
+    .res-val { font-size: 20px; font-weight: bold; color: #0284c7; margin-top: 4px; }
+  </style>
+</head>
+<body>
+
+<div class="card">
+  <h2>物質量 (mol) 総合計算シミュレータ</h2>
+
+  <!-- ビジュアル表示（粒子運動 & 体積イメージ） -->
+  <div class="vis-container">
+    <div class="vis-box">
+      <div class="vis-label">粒子運動イメージ (個数)</div>
+      <canvas id="particleCanvas"></canvas>
+    </div>
+    <div class="vis-box">
+      <div class="vis-label">気体体積イメージ (L)</div>
+      <canvas id="volumeCanvas"></canvas>
+    </div>
+  </div>
+  
+  <!-- 物質選択（拡大版） -->
+  <div class="group">
+    <label for="substance">物質を選択:</label>
+    <select id="substance">
+      <option value="44.0|#ef4444|gas|CO₂">二酸化炭素 (CO₂ - 44.0 g/mol)</option>
+      <option value="32.0|#3b82f6|gas|O₂">酸素 (O₂ - 32.0 g/mol)</option>
+      <option value="2.0|#38bdf8|gas|H₂">水素 (H₂ - 2.0 g/mol)</option>
+      <option value="28.0|#a855f7|gas|N₂">窒素 (N₂ - 28.0 g/mol)</option>
+      <option value="16.0|#eab308|gas|CH₄">メタン (CH₄ - 16.0 g/mol)</option>
+      <option value="39.9|#64748b|gas|Ar">アルゴン (Ar - 39.9 g/mol)</option>
+      <option value="63.5|#f97316|solid|Cu">銅 (Cu - 63.5 g/mol [固体])</option>
+      <option value="55.8|#475569|solid|Fe">鉄 (Fe - 55.8 g/mol [固体])</option>
+    </select>
+  </div>
+
+  <!-- mol スライダー & 直接数値入力 -->
+  <div class="group">
+    <label>物質量 [mol] 設定 (0.01 ～ 10.0 mol):</label>
+    <div class="range-flex">
+      <input type="range" id="molSlider" min="0.05" max="10.0" step="0.05" value="1.0">
+      <input type="number" id="molInput" value="1.00" min="0.01" max="100" step="0.01" style="width: 120px;">
+    </div>
+  </div>
+
+  <!-- 計算式表示枠 -->
+  <div class="formula-card">
+    <div class="formula-title">リアルタイム計算プロセス:</div>
+    <div class="formula-text" id="formulaDetail">---</div>
+  </div>
+
+  <!-- 計算結果表示 -->
+  <div class="grid">
+    <div class="res-box">
+      <div class="res-title">粒子数 [個]</div>
+      <div class="res-val" id="particles">-</div>
+    </div>
+    <div class="res-box">
+      <div class="res-title">質量 [g]</div>
+      <div class="res-val" id="mass">-</div>
+    </div>
+    <div class="res-box">
+      <div class="res-title">気体の体積 [L]</div>
+      <div class="res-val" id="volume">-</div>
+    </div>
+    <div class="res-box">
+      <div class="res-title">標準状態条件</div>
+      <div style="font-size: 13px; color: #475569; margin-top:4px;">0℃, 1atm (1013hPa)</div>
+    </div>
+  </div>
+</div>
+
+<script>
+  window.addEventListener('DOMContentLoaded', () => {
+    const NA = 6.022e23;
+    const pCanvas = document.getElementById('particleCanvas');
+    const pCtx = pCanvas.getContext('2d');
+    const vCanvas = document.getElementById('volumeCanvas');
+    const vCtx = vCanvas.getContext('2d');
+
+    const slider = document.getElementById('molSlider');
+    const input = document.getElementById('molInput');
+    const substanceSelect = document.getElementById('substance');
+
+    function resize() {
+      pCanvas.width = pCanvas.parentElement.clientWidth;
+      pCanvas.height = pCanvas.parentElement.clientHeight;
+      vCanvas.width = vCanvas.parentElement.clientWidth;
+      vCanvas.height = vCanvas.parentElement.clientHeight;
+    }
+    resize();
+    window.addEventListener('resize', resize);
+
+    let particles = [];
+
+    class Particle {
+      constructor(color) {
+        this.x = Math.random() * (pCanvas.width - 16) + 8;
+        this.y = Math.random() * (pCanvas.height - 16) + 8;
+        this.vx = (Math.random() - 0.5) * 2.5;
+        this.vy = (Math.random() - 0.5) * 2.5;
+        this.r = 5;
+        this.color = color;
+      }
+      move() {
+        this.x += this.vx;
+        this.y += this.vy;
+        if (this.x < this.r || this.x > pCanvas.width - this.r) this.vx *= -1;
+        if (this.y < this.r || this.y > pCanvas.height - this.r) this.vy *= -1;
+      }
+      draw() {
+        pCtx.beginPath();
+        pCtx.arc(this.x, this.y, this.r, 0, Math.PI * 2);
+        pCtx.fillStyle = this.color;
+        pCtx.fill();
+      }
+    }
+
+    function update(source) {
+      let mol = 1.0;
+      if (source === 'input') {
+        mol = parseFloat(input.value) || 0;
+        slider.value = mol;
+      } else {
+        mol = parseFloat(slider.value);
+        input.value = mol.toFixed(2);
+      }
+
+      const [molarMassStr, color, state, symbol] = substanceSelect.value.split('|');
+      const molarMass = parseFloat(molarMassStr);
+
+      const particleCount = mol * NA;
+      const massVal = mol * molarMass;
+      const volVal = state === 'gas' ? mol * 22.4 : 0;
+
+      // 数値更新
+      document.getElementById('particles').textContent = mol > 0 ? (mol * 6.022).toFixed(2) + ' × 10²³' : '0';
+      document.getElementById('mass').textContent = massVal.toFixed(2);
+      document.getElementById('volume').textContent = state === 'gas' ? volVal.toFixed(2) : '--- (固体)';
+
+      // 式表示
+      const pFormula = `${mol} mol × 6.02×10²³ /mol = ${(mol * 6.022).toFixed(2)}×10²³ 個`;
+      const mFormula = `${mol} mol × ${molarMass} g/mol = ${massVal.toFixed(2)} g`;
+      const vFormula = state === 'gas' 
+        ? `${mol} mol × 22.4 L/mol = ${volVal.toFixed(2)} L` 
+        : `固体のため体積(22.4L/mol)換算対象外`;
+
+      document.getElementById('formulaDetail').innerHTML = 
+        `【粒子数】${pFormula}<br>【質 量】${mFormula}<br>【体 積】${vFormula}`;
+
+      // 粒子数ビジュアルの更新
+      const targetCount = Math.min(Math.round(mol * 15), 150);
+      while (particles.length < targetCount) particles.push(new Particle(color));
+      while (particles.length > targetCount) particles.pop();
+      particles.forEach(p => p.color = color);
+
+      // 風船 (体積) の描画
+      drawVolumeBalloon(state === 'gas' ? volVal : 0, color, symbol);
+    }
+
+    function drawVolumeBalloon(vol, color, symbol) {
+      vCtx.clearRect(0, 0, vCanvas.width, vCanvas.height);
+      if (vol <= 0) {
+        vCtx.fillStyle = '#64748b';
+        vCtx.font = '12px sans-serif';
+        vCtx.textAlign = 'center';
+        vCtx.fillText('体積換算なし', vCanvas.width / 2, vCanvas.height / 2);
+        return;
+      }
+
+      const centerX = vCanvas.width / 2;
+      const centerY = vCanvas.height / 2;
+      // 体積に応じて半径を変更 (最大値に合わせてスケーリング)
+      const maxRadius = Math.min(vCanvas.width, vCanvas.height) * 0.42;
+      const radius = Math.min(Math.max(Math.sqrt(vol) * 4.5, 12), maxRadius);
+
+      vCtx.beginPath();
+      vCtx.arc(centerX, centerY, radius, 0, Math.PI * 2);
+      vCtx.fillStyle = color;
+      vCtx.globalAlpha = 0.6;
+      vCtx.fill();
+      vCtx.globalAlpha = 1.0;
+      vCtx.strokeStyle = '#ffffff';
+      vCtx.lineWidth = 2;
+      vCtx.stroke();
+
+      vCtx.fillStyle = '#ffffff';
+      vCtx.font = 'bold 13px sans-serif';
+      vCtx.textAlign = 'center';
+      vCtx.textBaseline = 'middle';
+      vCtx.fillText(`${vol.toFixed(1)} L`, centerX, centerY);
+    }
+
+    function loop() {
+      pCtx.clearRect(0, 0, pCanvas.width, pCanvas.height);
+      particles.forEach(p => {
+        p.move();
+        p.draw();
+      });
+      requestAnimationFrame(loop);
+    }
+
+    slider.addEventListener('input', () => update('slider'));
+    input.addEventListener('input', () => update('input'));
+    substanceSelect.addEventListener('change', () => update('slider'));
+
+    update('slider');
+    loop();
+  });
+</script>
+
+</body>
+</html>
